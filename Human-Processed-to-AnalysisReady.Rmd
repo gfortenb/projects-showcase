@@ -1,7 +1,7 @@
 ---
 title: "Processed To Analysis Ready Data Manipulation for Human Datasets"
 author: "Gavin Fortenberry and Amy Paguirigan"
-date: "July 23rd 2019 "
+date: "August 7th 2019 "
 output: 
   html_document: 
     toc: yes
@@ -17,7 +17,6 @@ If you do not already have Tidyverse and DESeq2 installed, this code will perfor
 ```{r eval=FALSE, message=FALSE, warning=TRUE, include=FALSE}
 # install tools for data manipulation and plotting
 install.packages("tidyverse")
-
 # install tools for genomic analysis
 if (!requireNamespace("BiocManager", quietly = TRUE))
   install.packages("BiocManager")
@@ -37,7 +36,6 @@ library(DESeq2)
 
 ## Importing Metadata
 In this repository, there is a folder called `ProjectData` that contains all of the projects' data in individual subdirectories.  The working directory of this project is the `Analysis` folder.  However, the path to the metadata file for each of the projects, relative to the current working directory is "../ProjectData/<PI-year-folder>/*.Metadata.csv". 
-
 Here we will read these files in to R and store them as data frames.Choose one and update `project` variable to match the folder name of the data you want to analyze.
 ```{r}
 project <- "Hockenbery-2018" # selecting the Hockenbery-2018 data!
@@ -53,18 +51,13 @@ metaData <- read.csv(file = metadataFile,
                           )
 
 ```
-
-
 ## Using tidyverse functions to learn about a dataset
 The "tidyverse" is a group of R packages that work together to form a handy language for manipulating datasets in R.  While it contains a wide array of functionalities, we are going to primarily focus here on the use of the `dplyr` package for manipulating data frames.  
-
 ### Get a feel for your metadata
 First you must get a feeling for what the data actually contain.  Here are some starting points for you to explore our two data frames.  
-
 ```{r echo=TRUE}
 # What are the names of our columns?
 colnames(metaData)
-
 ### How many samples are in each of this study's groups? (NOTE: the column name for study design is specific to the project, so the Parkhurst-2018 data has it's study design variable as `hockenbery2018`)
 metaData %>% group_by(hockenbery2018) %>% summarize(numberOfSamples = n())
 ```
@@ -85,13 +78,17 @@ Each sample has data in a different subfolder in "../ProjectData/<projectName>/"
 
 Processed data are in "../ProjectData/" and then in subdirectories based on the project. 
 ```{r}
-dataFiles <- list.files(path = paste0("../ProjectData/", project), # path to the data we want
+dataFilesENS <- list.files(path = paste0("../ProjectData/", project), # path to the data we want
                        recursive = TRUE, # we want to look inside any subdirectories
-                       pattern = ".out.tab", # we only want files that end in .out.tab
+                       pattern = "GRCh38.*out.tab", # we only want files that end in .out.tab
                        full.names = TRUE)  # we want the full path so we can find them later!
+dataFilesRefSeq <- list.files(path = paste0("../ProjectData/", project), # path to the data we want
+                       recursive = TRUE, # we want to look inside any subdirectories
+                       pattern = "hg38.*.out.tab", # we only want files that end in .out.tab
+                       full.names = TRUE)  # we want the full path so we can find them later!
+## PICK EIHER ENSEMBL OR REFSEQ
+dataFiles <- dataFilesRefSeq # dataFilesENS
 dataName <- gsub("/[^/]*", "", gsub("../ProjectData/[^/]*/", "", dataFiles)) # extracting the dataset name
-
-
 dataList <- lapply(dataFiles, function(x) {
   Y <- read.delim(file = x,
              header = FALSE,
@@ -99,13 +96,11 @@ dataList <- lapply(dataFiles, function(x) {
              sep = "\t",
              stringsAsFactors = FALSE)
   Z <- Y[,1:2] # in this case we had unstranded data so only need first two columns
-  colnames(Z) <- c("ENS.geneID", "counts")
+  colnames(Z) <- c("geneID", "counts")
   Z
 })
 names(dataList) <- dataName
-
 studyData <- purrr::map_dfr(dataList, cbind, .id = "molecular_id")
-
 studyCountsTable <- tidyr::spread(data = studyData, key = "molecular_id", value = "counts")
 ```
 
@@ -124,11 +119,13 @@ studyCountsTable <- read.csv(file = paste0("Results/", project, "/studyCountsTab
                              stringsAsFactors = F)
 ```
 
-
+```{r Write CSV of only "NM" Id's from "dfResults" }
+#refseq_IDs <- dfResults(0, 1)
+```
 ### Explore your RNA Seq data
 How many genes are there?
 ```{r}
-length(unique(studyCountsTable$ENS.geneID))
+length(unique(studyCountsTable$geneID))
 ```
 
 How many total read counts did we get for each sample?
@@ -150,7 +147,7 @@ ens97annotation <- read.delim("ENS.v97-annotation.txt",
                               header = T,
                               stringsAsFactors = F)
 ens97convert <- ens97annotation %>% dplyr::select(Gene.stable.ID.version, Gene.name) %>% unique()
-studyCountsTableGenes <- left_join(studyCountsTable, ens97convert, by = c("ENS.geneID" = "Gene.stable.ID.version"))
+studyCountsTableGenes <- left_join(studyCountsTable, ens97convert, by = c("geneID" = "Gene.stable.ID.version"))
 ```
 
 
@@ -164,10 +161,8 @@ Next you will need to create an analysis-ready dataset ready for analysis via DE
 ```{r}
 countsMatrix <- as.matrix(studyCountsTable[,-1])
 rownames(countsMatrix) <- studyCountsTable[,1]
-
 ncol(countsMatrix)  # How many columns are there?  Should be one column for each sample.
 nrow(countsMatrix) # How many rows are there?  Should be one row for each gene ID (about 22,000 for humans)
-
 ```
 ### Create a phenotype Matrix
 Imports all data/columns except
@@ -181,9 +176,7 @@ rownames(phenoMatrix) <- as.character(metaData$molecular_id)
 A DESeqDataSet object must have an associated design formula. The design formula expresses the variables which will be used in modeling. The formula should be a tilde (~) followed by the variables with plus signs between them (it will be coerced into an formula if it is not already). The design can be changed later, however then all differential analysis steps should be repeated, as the design formula is used to estimate the dispersions and to estimate the log2 fold changes of the model.
 ```{r} 
 dseqDataSet<- DESeqDataSetFromMatrix(countsMatrix, phenoMatrix, design = ~ hockenbery2018)
-
 dseqDataSet$hockenbery2018 <- relevel(dseqDataSet$hockenbery2018, "glucose") # make the "control" level be "glucose"
-
 dseqDataSet <- dseqDataSet[ rowSums(counts(dseqDataSet)) > 1, ] # filter out rows of gene counts of 1's and 0's that will not be useful data in the future
 ```
 
@@ -215,6 +208,4 @@ write.csv(dfResults,
 
 
 # Data Visuzalization
-
-
 
